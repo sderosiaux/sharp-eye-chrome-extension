@@ -9,15 +9,12 @@ body {
 }
 
 .header {
-  position: sticky;
-  top: 0;
   background: #fff;
   border-bottom: 1px solid #eee;
   padding: 12px 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  z-index: 100;
 }
 
 .header-left {
@@ -62,14 +59,17 @@ body {
 }
 
 .header-button.primary {
-  background: #007AFF;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
-  border-color: #007AFF;
+  border: none;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
 }
 
 .header-button.primary:hover {
-  background: #0066CC;
-  border-color: #0066CC;
+  background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
+  transform: translateY(-1px);
 }
 
 .header-button svg {
@@ -79,19 +79,26 @@ body {
 }
 
 .header-button.icon-only {
-  padding: 8px;
-  min-width: 32px;
+  padding: 8px 10px;
+  min-width: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: #f0f0f0;
+  border: none;
 }
 
 .header-button.icon-only .button-icon {
-  font-size: 16px;
+  font-size: 14px;
+  opacity: 0.8;
 }
 
 .header-button.icon-only:hover {
-  background: #f5f5f5;
+  background: #e0e0e0;
+}
+
+.header-button.icon-only:hover .button-icon {
+  opacity: 1;
 }
 
 /* Common modal styles */
@@ -441,278 +448,6 @@ body {
   align-items: center;
 }
 
-.analyze-buttons-container {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding: 16px;
-  background-color: #f8f9fa;
-  border-radius: 8px;
-  border: 1px solid #e9ecef;
-}
-
-.analyze-buttons-container .header-button {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Dark theme styles */
-@media (prefers-color-scheme: dark) {
-  body {
-    color: #e0e0e0;
-    background-color: #1a1a1a;
-  }
-
-  .header {
-    background-color: #1a1a1a;
-    border-bottom-color: #404040;
-  }
-
-  .header-left {
-    color: #e0e0e0;
-  }
-
-  .result {
-    background-color: #2d2d2d;
-    border-color: #404040;
-  }
-
-  .result.error {
-    background-color: rgba(220, 53, 69, 0.1);
-    border-color: #dc3545;
-    color: #ff6b6b;
-  }
-
-  .loading {
-    color: #999;
-  }
-
-  .article-title {
-    color: #e0e0e0;
-    border-bottom-color: #404040;
-  }
-
-  .markdown-content {
-    color: #e0e0e0;
-  }
-
-  .markdown-content h1,
-  .markdown-content h2,
-  .markdown-content h3,
-  .markdown-content h4 {
-    color: #e0e0e0;
-  }
-
-  .markdown-content h1 {
-    border-bottom-color: #404040;
-  }
-
-  .markdown-content h2 {
-    color: #64b5f6;
-    border-bottom-color: #404040;
-  }
-
-  .markdown-content h3 {
-    color: #81c784;
-  }
-
-  .markdown-content h4 {
-    color: #bdbdbd;
-  }
-
-  .markdown-content code {
-    background-color: #2d2d2d;
-    color: #e0e0e0;
-  }
-
-  .markdown-content pre {
-    background-color: #2d2d2d;
-    border-color: #404040;
-  }
-
-  .markdown-content blockquote {
-    border-left-color: #404040;
-    color: #bdbdbd;
-  }
-
-  .markdown-content table {
-    border-color: #404040;
-  }
-
-  .markdown-content th,
-  .markdown-content td {
-    border-color: #404040;
-  }
-
-  .markdown-content th {
-    background-color: #2d2d2d;
-  }
-
-  .api-key-content,
-  .raw-content-content {
-    background-color: #2d2d2d;
-    border-color: #404040;
-  }
-
-  .raw-content-header {
-    border-bottom-color: #404040;
-  }
-
-  .raw-content-body {
-    background-color: #1a1a1a;
-    border-color: #404040;
-    color: #e0e0e0;
-  }
-
-  .raw-content-actions {
-    border-top-color: #404040;
-  }
-
-  .api-key-status {
-    color: #999;
-  }
-
-  .api-key-status.valid {
-    color: #81c784;
-  }
-
-  .primary-button {
-    background-color: #007AFF;
-    color: white;
-  }
-
-  .primary-button:hover {
-    background-color: #0056b3;
-  }
-
-  .secondary-button {
-    background-color: #2d2d2d;
-    color: #e0e0e0;
-    border-color: #404040;
-  }
-
-  .secondary-button:hover {
-    background-color: #363636;
-  }
-
-  .action-button {
-    background-color: #2d2d2d;
-    color: #e0e0e0;
-    border-color: #404040;
-  }
-
-  .action-button:hover {
-    background-color: #363636;
-    border-color: #4d4d4d;
-  }
-
-  .action-button.copied {
-    background-color: #28a745;
-    color: white;
-    border-color: #28a745;
-  }
-
-  .header-button {
-    background-color: #2d2d2d;
-    border-color: #404040;
-    color: #e0e0e0;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-  }
-
-  .header-button:hover {
-    background-color: #363636;
-    border-color: #4d4d4d;
-  }
-
-  .header-button:active {
-    background-color: #404040;
-  }
-
-  .analyze-buttons-container {
-    background-color: #2d2d2d;
-    border-color: #404040;
-  }
-
-  /* Unified modal content styles for dark theme */
-  .modal-content,
-  .api-key-content,
-  .raw-content-content,
-  .modal {
-    background-color: #2d2d2d !important;
-    border: 1px solid #404040;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    color: #e0e0e0;
-  }
-
-  .modal-header,
-  .raw-content-header {
-    border-bottom-color: #404040;
-  }
-
-  .modal-title,
-  .raw-content-title,
-  .api-key-header {
-    color: #e0e0e0;
-  }
-
-  .modal-close {
-    color: #e0e0e0;
-  }
-
-  .modal-close:hover {
-    background-color: #363636;
-  }
-
-  .modal-body,
-  .raw-content-body {
-    background-color: #1a1a1a;
-    border-color: #404040;
-    color: #e0e0e0;
-  }
-
-  .modal-footer,
-  .raw-content-actions {
-    border-top-color: #404040;
-  }
-
-  .api-key-input {
-    background-color: #1a1a1a;
-    border-color: #404040;
-    color: #e0e0e0;
-  }
-
-  .api-key-input:focus {
-    border-color: #666;
-    box-shadow: 0 0 0 2px rgba(102, 102, 102, 0.2);
-  }
-
-  .modal-overlay {
-    background: rgba(0, 0, 0, 0.7);
-  }
-
-  .status-message {
-    background-color: #2d2d2d;
-    border-color: #404040;
-  }
-
-  .status-message.success {
-    background-color: rgba(40, 167, 69, 0.1);
-    border-color: #28a745;
-  }
-
-  .status-message.error {
-    background-color: rgba(220, 53, 69, 0.1);
-    border-color: #dc3545;
-  }
-
-  .loading-spinner {
-    border-color: #404040;
-    border-top-color: #666;
-  }
-}
 
 /* Remove any duplicate modal styles */
 .modal {

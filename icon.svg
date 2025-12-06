@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="#667eea"/>
+
+  <!-- Eye shape (almond) -->
+  <path d="M20 64 Q64 20 108 64 Q64 108 20 64 Z" fill="white"/>
+
+  <!-- Iris -->
+  <circle cx="64" cy="64" r="22" fill="#764ba2"/>
+
+  <!-- Pupil -->
+  <circle cx="64" cy="64" r="10" fill="#1a1a2e"/>
+
+  <!-- Sharp highlight (diamond shape) -->
+  <path d="M58 54 L64 48 L70 54 L64 60 Z" fill="white" opacity="0.9"/>
+
+  <!-- Secondary highlight -->
+  <circle cx="72" cy="58" r="4" fill="white" opacity="0.6"/>
+</svg>

@@ -1,9 +1,16 @@
 {
   "manifest_version": 3,
-  "name": "Content Critic",
+  "name": "Sharp Eye",
   "version": "1.0",
-  "description": "Analyse et critique le contenu des pages web avec l'IA",
-  
+  "description": "AI-powered content analysis and critique",
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
   "permissions": [
     "activeTab",
     "sidePanel",
@@ -32,7 +39,12 @@
   },
   
   "action": {
-    "default_title": "Analyser cette page"
+    "default_title": "Analyze this page",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
   },
   "web_accessible_resources": [
     {

@@ -3,7 +3,7 @@ class Prompt {
   constructor(options = {}) {
     this.language = options.language || 'FRENCH';
     this.maxTokens = options.maxTokens || 20000;
-    this.model = options.model || 'o4-mini';
+    this.model = options.model || 'gpt-5-mini';
   }
 
   // Abstract method that must be implemented by subclasses
@@ -33,6 +33,11 @@ class Prompt {
       maxTokens: this.maxTokens
     };
   }
+
+  // Method to get JSON schema for structured outputs (override in subclasses)
+  getJsonSchema() {
+    return null;
+  }
 }
 
 // Critic Prompt for content analysis
@@ -49,6 +54,8 @@ class CriticPrompt extends Prompt {
     return `You are a sharp, relentless content critic.
 Your job is to break down any post, article, or idea I give you.
 
+IMPORTANT: The content provided is extracted from a whole HTML page. It may contain a lot of noise such as navigation menus, headers, footers, sidebars, ads, and other irrelevant elements. Your task is to identify the "meat" of the page - the main article or core content - and focus your analysis ONLY on that. Ignore navigation, boilerplate, and peripheral content.
+
 You do not summarize. You do not agree. You challenge.
 
 You focus on:
@@ -59,12 +66,14 @@ You focus on:
 
 Ask hard questions like:
 - What breaks this?
+- What's true but non-obvious? (edge cases, hidden insights)
 - What's assumed? What are the tradeoffs?
-- What's a better wedge or leverage?
-- If this is true, what becomes the next constraint?
+- What will be the new limiting factor if this is true?
+- What's the force multiplier/leverage/wedge? Is there an asymmetry?
 
 Tone:
 - No fluff. No praise unless it serves the analysis. Stay curious, sharp, and bold. Push thinking further.
+- Be concise without losing meaning. Use symbols to improve readability: *, →, ≠, ~, ::, =, <, >, //, @, ^
 
 Output rules: return ONLY a valid JSON object like this:
 {
@@ -86,10 +95,11 @@ CRITICAL RULES:
 1. Return ONLY the JSON object, with no other text, it must be valid and complete
 2. Do not include any markdown formatting outside of the JSON
 3. Do not include any explanations or notes outside of the JSON
+4. Focus ONLY on the main article content, ignore navigation, headers, footers, and other page noise
 5. Each highlight's "text" field must be an EXACT quote from the content, NOT altered, NOT paraphrased, NOT summarized, NOT changed in any way.
 6. Do not put your analysis in the "text" field - use the "explanation" field instead
 7. Please generate minimum 5 and maximum 15 highlights. The more the better.
-8. DO NOT wrap markdown tables or headers in 
+8. DO NOT wrap markdown tables or headers in code blocks
 9. Highlight types MUST only be one of: fluff|fallacy|assumption|contradiction|inconsistency.
 
 Your answer must be in ${this.language}.
@@ -115,10 +125,6 @@ Please analyze and critique the following content:`;
 
     if (!Array.isArray(response.highlights)) {
       throw new Error('Response must have a "highlights" array');
-    }
-
-    if (response.highlights.length < 5 || response.highlights.length > 15) {
-      //throw new Error('Response must have between 5 and 15 highlights');
     }
 
     response.highlights.forEach((highlight, index) => {
@@ -152,283 +158,87 @@ Please analyze and critique the following content:`;
 
   parseResponse(rawResponse) {
     // For critic prompts, we expect a JSON object
-    const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('No valid JSON object found in response for CRITIC task');
+    let parsedResult;
+
+    // Try to parse as JSON directly first (for structured outputs)
+    try {
+      parsedResult = typeof rawResponse === 'string' ? JSON.parse(rawResponse) : rawResponse;
+    } catch {
+      // Fall back to regex extraction for non-structured responses
+      const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No valid JSON object found in response for CRITIC task');
+      }
+      parsedResult = JSON.parse(jsonMatch[0]);
     }
 
-    const parsedResult = JSON.parse(jsonMatch[0]);
-    this.validateResponse(parsedResult); // Validate the parsed response
+    this.validateResponse(parsedResult);
 
     return {
       analysis: parsedResult.analysis,
       highlights: parsedResult.highlights || []
     };
   }
-}
 
-// Critical Thinking Prompt for business analysis
-class CriticalThinkingPrompt extends Prompt {
-  constructor(options = {}) {
-    super({
-      ...options,
-      maxTokens: options.maxTokens || 20000
-    });
-  }
-
-  getPrompt() {
-    return `<context>
-    I'm making an important business decision and I want to think through it rigorously.
-    The idea may relate to product strategy, market positioning, organizational design, or resource allocation.
-    I want to avoid blind spots, weak assumptions, or strategic traps.
-  </context>
-
-  <role>
-    Act as a strategic thought partner with the mindset of a skeptical investor, an experienced operator, and a rational analyst.
-    Your job is not to agree with me. Your job is to make my thinking sharper and more grounded.
-  </role>
-
-  <instructions>
-    Focus on clarity, business realism, and long-term consequences.
-    Avoid buzzwords, generalities, or surface-level reactions.
-    Think through the idea like you'd do if money, time, and reputation were on the line.
-  </instructions>
-
-  <structure>
-    <step1>Restate the core idea in your own words to make sure it's coherent and well-framed.</step1>
-    <step2>Identify implicit assumptions or areas I may be overlooking.</step2>
-    <step3>Ask 3 to 5 sharp questions that would help me think more clearly or expose risks.</step3>
-    <step4>Present strong counterpoints that someone skeptical would raise.</step4>
-    <step5>Suggest alternative ways to reach the same goal, if this one has flaws.</step5>
-    <step6>Give a quick clarity and focus check: does the idea feel crisp, grounded, and actionable?</step6>
-  </structure>
-
-  <tone>
-    Direct, clear, analytical. No hedging. No polite filler. No vague encouragement.
-  </tone>
-
-Your answer must be in ${this.language}.
-Please analyze and critique the following content:`;
-  }
-
-  validateResponse(response) {
-    // For critical thinking, we expect a markdown formatted response
-    if (typeof response !== 'string') {
-      throw new Error('Response must be a string');
-    }
-    return true;
-  }
-
-  parseResponse(rawResponse) {
-    // For critical thinking, we expect a markdown formatted string
-    this.validateResponse(rawResponse); // Validate the raw response
+  getJsonSchema() {
     return {
-      analysis: rawResponse
-    };
-  }
-}
-
-// HackerNews Prompt for comment analysis
-class HackerNewsPrompt extends Prompt {
-  constructor(options = {}) {
-    super({
-      ...options,
-      maxTokens: options.maxTokens || 20000
-    });
-  }
-
-  getPrompt() {
-    return `Please provide a synthesis of the most important, opinionated, and surprising feedback from the HackerNews comments below. Additionally, you should highlight visionary ideas, mentions of competitors, identified opportunities, and raised challenges from the comments. 
-
-Your response should be detailed, structured, and actionable, including concrete examples from the comments to provide valuable context.
-
-Structure your analysis as follows:
-- **Key Opinions & Surprising Takes**: Most thought-provoking viewpoints
-- **Visionary Ideas**: Forward-thinking concepts and predictions  
-- **Competitive Landscape**: Mentions of competitors, alternatives, comparisons
-- **Opportunities**: Business, technical, or strategic opportunities identified
-- **Challenges & Concerns**: Major issues, risks, and obstacles raised
-- **Actionable Insights**: Concrete takeaways and next steps
-
-Don't add comments before and after your analysis.
-Answer using the markdown format only, using #, ##, ### for headers.
-Each opinion should be a subtitle followed by some explanation.
-
-Your answer must be in ${this.language}.
-Here are the HackerNews comments to analyze:`;
-  }
-
-  validateResponse(response) {
-    // For HackerNews, we expect a markdown formatted response
-    if (typeof response !== 'string') {
-      throw new Error('Response must be a string');
-    }
-    return true;
-  }
-
-  parseResponse(rawResponse) {
-    // For HackerNews, we expect a markdown formatted string
-    this.validateResponse(rawResponse); // Validate the raw response
-    return {
-      analysis: rawResponse
-    };
-  }
-}
-
-// Translation Prompt for translation tasks
-class TranslationPrompt extends Prompt {
-  constructor(options = {}) {
-    super({
-      ...options,
-      maxTokens: options.maxTokens || 20000,
-      model: options.model || 'gpt-4.1-mini'
-    });
-  }
-
-  getPrompt() {
-    return `You are a translator. Return a JSON object of ${this.language} translations.
-
-FORMAT: {"t0":"translation0","t1":"translation1",...}
-
-CRITICAL RULES:
-1. Return ONLY a valid JSON object
-2. Keep tech terms in English
-3. Keep numbers/units unchanged
-4. Remove unnecessary words only if that does not change the order of the translations
-5. IMPORTANT: Each input key (t0, t1, etc.) MUST have exactly one translation
-6. IMPORTANT: NEVER split a single input text into multiple translations
-7. IMPORTANT: NEVER merge multiple input texts into one translation
-8. IMPORTANT: Maintain the exact order of translations (t0, t1, t2, etc.)
-9. IMPORTANT: Do not add or remove any keys
-10. IMPORTANT: Each translation must be a complete, standalone translation of its input text
-11. IMPORTANT: If an input text contains multiple sentences, keep them together in one translation
-
-Example of CORRECT behavior:
-Input: {"t0":"Hello world","t1":"API endpoint","t2":"Your enterprise data architecture is sprawling"}
-Output: {"t0":"Bonjour le monde","t1":"API endpoint","t2":"Votre architecture de données d'entreprise est étendue"}
-
-Example of INCORRECT behavior (DO NOT DO THIS):
-Input: {"t0":"Your enterprise data architecture is sprawling"}
-Output: {"t0":"Votre architecture de données","t1":"d'entreprise est étendue"}  // WRONG: split into two translations
-
-Texts: `;
-  }
-
-  validateResponse(response) {
-    try {
-      const translations = typeof response === 'string' ? JSON.parse(response) : response;
-      
-      if (typeof translations !== 'object' || Array.isArray(translations)) {
-        throw new Error('Response is not a JSON object');
+      name: "critic_response",
+      strict: true,
+      schema: {
+        type: "object",
+        properties: {
+          analysis: {
+            type: "object",
+            properties: {
+              summary: {
+                type: "string",
+                description: "A 5-10 rows table (Markdown format) summary highlighting core premise, risks, effects, and tradeoffs"
+              },
+              critique: {
+                type: "string",
+                description: "Detailed analysis and critique in markdown format using #, ##, ### for headers"
+              }
+            },
+            required: ["summary", "critique"],
+            additionalProperties: false
+          },
+          highlights: {
+            type: "array",
+            description: "Array of 5-15 highlights from the content",
+            items: {
+              type: "object",
+              properties: {
+                text: {
+                  type: "string",
+                  description: "EXACT quote from the content - copy and paste word for word, no alterations"
+                },
+                type: {
+                  type: "string",
+                  enum: ["fluff", "fallacy", "assumption", "contradiction", "inconsistency"],
+                  description: "Type of issue identified"
+                },
+                explanation: {
+                  type: "string",
+                  description: "Analysis of why this text is problematic"
+                },
+                suggestion: {
+                  type: "string",
+                  description: "Suggestion for improvement, or empty string if none"
+                }
+              },
+              required: ["text", "type", "explanation", "suggestion"],
+              additionalProperties: false
+            }
+          }
+        },
+        required: ["analysis", "highlights"],
+        additionalProperties: false
       }
-
-      // Validate each translation
-      Object.entries(translations).forEach(([key, value]) => {
-        if (!key.startsWith('t')) {
-          throw new Error(`Invalid key format: ${key}. Keys must start with 't'`);
-        }
-        if (typeof value !== 'string') {
-          throw new Error(`Translation for ${key} must be a string`);
-        }
-      });
-
-      return true;
-    } catch (error) {
-      throw new Error(`Invalid translation response: ${error.message}`);
-    }
-  }
-
-  parseResponse(rawResponse) {
-    try {
-      const translations = JSON.parse(rawResponse);
-      this.validateResponse(translations);
-      return { translations };
-    } catch (e) {
-      throw new Error('Invalid translation response format - ' + e.message);
-    }
-  }
-}
-
-// Suggestion Prompt for generating suggestions
-class SuggestionPrompt extends Prompt {
-  constructor(options = {}) {
-    super({
-      ...options,
-      maxTokens: options.maxTokens || 20000
-    });
-  }
-
-  getPrompt(analysisType, text, explanation, contextBefore = '', contextAfter = '') {
-    return `En tant qu'expert en analyse de contenu, je te demande de suggérer une amélioration pour le texte suivant :
-
-Type d'analyse: ${analysisType}
-
-<previousContext>
-${contextBefore}
-</previousContext>
-
-<textAnalyzed>
-${text}
-</textAnalyzed>
-
-<followingContext>
-${contextAfter}
-</followingContext>
-
-<currentExplanation>
-${explanation}
-</currentExplanation>
-
-Peux-tu suggérer une amélioration ou une reformulation qui résoudrait le problème identifié (<currentExplanation>) ? 
-La suggestion ne doit pas prendre plus de 500 caractères.
-Prends en compte le contexte avant (previousContext) et après (followingContext) pour proposer une suggestion qui s'intègre naturellement dans le texte.
-Réponds uniquement avec ton amélioration, sans explication supplémentaire.`;
-  }
-
-  validateResponse(response) {
-    if (typeof response !== 'string') {
-      throw new Error('Response must be a string');
-    }
-    if (response.length > 500) {
-      throw new Error('Suggestion must not exceed 500 characters');
-    }
-    return true;
-  }
-
-  parseResponse(rawResponse) {
-    // For suggestions, we expect a plain string
-    this.validateResponse(rawResponse); // Validate the raw response
-    return { suggestion: rawResponse.trim() };
-  }
-}
-
-// Prompt Factory for creating and managing prompts
-class PromptFactory {
-  static createPrompt(type, options = {}) {
-    switch (type.toLowerCase()) {
-      case 'critic':
-        return new CriticPrompt(options);
-      case 'critical_thinking':
-        return new CriticalThinkingPrompt(options);
-      case 'hackernews':
-        return new HackerNewsPrompt(options);
-      case 'translation':
-        return new TranslationPrompt(options);
-      case 'suggestion':
-        return new SuggestionPrompt(options);
-      default:
-        throw new Error(`Unknown prompt type: ${type}`);
-    }
+    };
   }
 }
 
 // Export the classes
 export {
-  Prompt,
-  CriticPrompt,
-  CriticalThinkingPrompt,
-  HackerNewsPrompt,
-  TranslationPrompt,
-  SuggestionPrompt,
-  PromptFactory
+  CriticPrompt
 }; 

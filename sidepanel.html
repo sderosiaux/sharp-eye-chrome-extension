@@ -2,19 +2,13 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Content Critic</title>
+  <title>Sharp Eye</title>
   <link rel="stylesheet" type="text/css" href="sidepanel.css">
 </head>
 <body>
   <div class="header">
-    <div class="header-left">Content Critic</div>
+    <div class="header-left">Sharp Eye</div>
     <div class="header-right">
-      <button id="resetTabBtn" class="header-button" title="Reset Tab State">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-        </svg>
-        Reset Tab
-      </button>
       <button id="apiKeyBtn" class="header-button" title="API Key">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M15 7h3a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-3m-6 0H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h3m0 0V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2M9 7h6"/>
@@ -69,13 +63,6 @@
       </div>
       <div id="rawContentTokenInfo" class="token-info"></div>
       <div id="rawContentText" class="raw-content-body"></div>
-      <div id="rawContentEdit" class="raw-content-body" style="display: none;">
-        <textarea id="rawContentTextarea" style="width: 100%; height: 100%; min-height: 200px; border: none; resize: vertical; font-family: monospace; font-size: 13px; line-height: 1.5;"></textarea>
-        <div class="edit-actions">
-          <button id="saveContentBtn" class="action-button">Save</button>
-          <button id="cancelEditBtn" class="action-button">Cancel</button>
-        </div>
-      </div>
     </div>
   </div>
 

@@ -1,19 +1,16 @@
 // background.js
-console.log('Content Critic: Background script chargé');
 
-// Configure le side panel
+// Configure side panel to open on action click
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Content Critic: Configuration du side panel');
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 });
 
-// Injecte le content script dans les pages web
+// Inject content script into web pages
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  // Only inject if we have a valid URL and the page is complete
   if (changeInfo.status === 'complete' && tab?.url?.startsWith('http')) {
     chrome.scripting.executeScript({
-      target: { tabId: tabId },
+      target: { tabId },
       files: ['content.js']
-    }).catch(err => console.log('Script injection failed:', err));
+    }).catch(() => {});
   }
 });
