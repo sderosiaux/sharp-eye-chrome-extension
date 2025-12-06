@@ -38,12 +38,34 @@
 
   <div id="result"></div>
 
-  <!-- API Key Modal -->
+  <!-- Settings Modal -->
   <div id="apiKeyModal" class="modal-overlay api-key-modal">
     <div class="api-key-content">
-      <div class="api-key-header">API Key Configuration</div>
-      <input type="password" id="apiKey" class="api-key-input" placeholder="Enter your API key">
-      <div id="apiKeyStatus" class="api-key-status">Not configured</div>
+      <div class="api-key-header">Settings</div>
+
+      <div class="settings-group">
+        <label class="settings-label">API Key</label>
+        <input type="password" id="apiKey" class="api-key-input" placeholder="Enter your OpenAI API key">
+        <div id="apiKeyStatus" class="api-key-status">Not configured</div>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Output Language</label>
+        <select id="language" class="settings-select">
+          <option value="ENGLISH">English</option>
+          <option value="FRENCH">French</option>
+          <option value="SPANISH">Spanish</option>
+          <option value="GERMAN">German</option>
+          <option value="ITALIAN">Italian</option>
+          <option value="PORTUGUESE">Portuguese</option>
+          <option value="DUTCH">Dutch</option>
+          <option value="RUSSIAN">Russian</option>
+          <option value="CHINESE">Chinese</option>
+          <option value="JAPANESE">Japanese</option>
+          <option value="KOREAN">Korean</option>
+        </select>
+      </div>
+
       <div class="api-key-actions">
         <button id="saveApiKeyBtn" class="header-button primary">Save</button>
         <button id="closeApiKeyBtn" class="header-button">Cancel</button>

@@ -1,53 +1,14 @@
-// Base Prompt class
-class Prompt {
+// Critic Prompt for content analysis
+class CriticPrompt {
   constructor(options = {}) {
-    this.language = options.language || 'FRENCH';
+    this.language = options.language || 'ENGLISH';
     this.maxTokens = options.maxTokens || 20000;
     this.model = options.model || 'gpt-5-mini';
+    this.validHighlightTypes = ['fluff', 'fallacy', 'assumption', 'contradiction', 'inconsistency'];
   }
 
-  // Abstract method that must be implemented by subclasses
-  getPrompt() {
-    throw new Error('getPrompt() must be implemented by subclass');
-  }
-
-  // Abstract method for response validation
-  validateResponse(response) {
-    throw new Error('validateResponse() must be implemented by subclass');
-  }
-
-  // Common method to format the final prompt with content
   formatWithContent(content) {
     return `${this.getPrompt()}\n\n${content}`;
-  }
-
-  // Abstract method for parsing raw API response
-  parseResponse(rawResponse) {
-    throw new Error('parseResponse() must be implemented by subclass');
-  }
-
-  // Common method to prepare API call options
-  getApiCallOptions() {
-    return {
-      model: this.model,
-      maxTokens: this.maxTokens
-    };
-  }
-
-  // Method to get JSON schema for structured outputs (override in subclasses)
-  getJsonSchema() {
-    return null;
-  }
-}
-
-// Critic Prompt for content analysis
-class CriticPrompt extends Prompt {
-  constructor(options = {}) {
-    super({
-      ...options,
-      maxTokens: options.maxTokens || 20000
-    });
-    this.validHighlightTypes = ['fluff', 'fallacy', 'assumption', 'contradiction', 'inconsistency'];
   }
 
   getPrompt() {

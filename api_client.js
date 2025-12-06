@@ -42,9 +42,4 @@ class OpenAiApiClient {
   }
 }
 
-// Factory for creating API clients
-function createApiClient(apiKey, options = {}) {
-  return new OpenAiApiClient({ ...options, apiKey });
-}
-
-export { OpenAiApiClient, createApiClient };
+export { OpenAiApiClient };
