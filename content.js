@@ -3,11 +3,52 @@
   if (window.contentCriticInitialized) return;
   window.contentCriticInitialized = true;
 
+  // ============================================
+  // Setup
+  // ============================================
+
   const link = document.createElement('link');
   link.rel = 'stylesheet';
   link.type = 'text/css';
   link.href = chrome.runtime.getURL('content.css');
   document.head.appendChild(link);
+
+  // ============================================
+  // Utility Functions
+  // ============================================
+
+  function normalizeText(text) {
+    if (!text) return '';
+    return text
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function createTextWalker(root = document.body) {
+    return document.createTreeWalker(
+      root,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: function(node) {
+          if (!node.parentElement ||
+              node.parentElement.closest('script, style, noscript, .content-critic-highlight-box')) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          if (!node.textContent || normalizeText(node.textContent).length === 0) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      },
+      false
+    );
+  }
+
+  // ============================================
+  // Tooltip Functions
+  // ============================================
 
   function positionTooltip(tooltip, highlightRect) {
     const tooltipRect = tooltip.getBoundingClientRect();
@@ -32,7 +73,9 @@
     tooltip.style.left = `${left}px`;
   }
 
-  function createTooltip(text, type, explanation, suggestion) {
+  function createTooltip(highlight) {
+    const { type, explanation, suggestion } = highlight;
+
     const tooltip = document.createElement('div');
     tooltip.className = 'content-critic-tooltip';
     tooltip.style.display = 'none';
@@ -69,6 +112,49 @@
     return tooltip;
   }
 
+  // ============================================
+  // Hover Behavior
+  // ============================================
+
+  function setupHoverBehavior(element, tooltip) {
+    let hoverTimeout;
+
+    function showTooltip(rect) {
+      clearTimeout(hoverTimeout);
+      positionTooltip(tooltip, rect);
+      tooltip.style.display = 'block';
+      requestAnimationFrame(() => tooltip.classList.add('visible'));
+    }
+
+    function hideTooltip() {
+      hoverTimeout = setTimeout(() => {
+        tooltip.classList.remove('visible');
+        tooltip.addEventListener('transitionend', () => {
+          if (!tooltip.classList.contains('visible')) {
+            tooltip.style.display = 'none';
+          }
+        }, { once: true });
+      }, 100);
+    }
+
+    element.addEventListener('mouseenter', () => {
+      showTooltip(element.getBoundingClientRect());
+    });
+
+    element.addEventListener('mouseleave', hideTooltip);
+
+    tooltip.addEventListener('mouseenter', () => {
+      clearTimeout(hoverTimeout);
+      tooltip.classList.add('visible');
+    });
+
+    tooltip.addEventListener('mouseleave', hideTooltip);
+  }
+
+  // ============================================
+  // Highlight Box Functions
+  // ============================================
+
   function createHighlightBox(rect, type, tooltip) {
     const box = document.createElement('div');
     box.className = `content-critic-highlight-box ${type}`;
@@ -79,43 +165,7 @@
     box.style.height = `${rect.height}px`;
     box.style.zIndex = '2147483646';
 
-    let hoverTimeout;
-    box.addEventListener('mouseenter', () => {
-      clearTimeout(hoverTimeout);
-      const boxRect = box.getBoundingClientRect();
-      positionTooltip(tooltip, boxRect);
-      tooltip.style.display = 'block';
-      requestAnimationFrame(() => {
-        tooltip.classList.add('visible');
-      });
-    });
-
-    box.addEventListener('mouseleave', () => {
-      hoverTimeout = setTimeout(() => {
-        tooltip.classList.remove('visible');
-        tooltip.addEventListener('transitionend', () => {
-          if (!tooltip.classList.contains('visible')) {
-            tooltip.style.display = 'none';
-          }
-        }, { once: true });
-      }, 100);
-    });
-
-    tooltip.addEventListener('mouseenter', () => {
-      clearTimeout(hoverTimeout);
-      tooltip.classList.add('visible');
-    });
-
-    tooltip.addEventListener('mouseleave', () => {
-      hoverTimeout = setTimeout(() => {
-        tooltip.classList.remove('visible');
-        tooltip.addEventListener('transitionend', () => {
-          if (!tooltip.classList.contains('visible')) {
-            tooltip.style.display = 'none';
-          }
-        }, { once: true });
-      }, 100);
-    });
+    setupHoverBehavior(box, tooltip);
 
     return box;
   }
@@ -129,28 +179,17 @@
       const text = box.getAttribute('data-highlight-text');
       if (!text) return;
 
-      const walker = document.createTreeWalker(
-        document.body,
-        NodeFilter.SHOW_TEXT,
-        {
-          acceptNode: function(node) {
-            if (!node.parentElement ||
-                node.parentElement.closest('script, style, noscript, .content-critic-highlight-box')) {
-              return NodeFilter.FILTER_REJECT;
-            }
-            return NodeFilter.FILTER_ACCEPT;
-          }
-        },
-        false
-      );
+      const walker = createTextWalker();
+      const normalizedSearch = normalizeText(text);
 
       let node;
       let found = false;
+
       while (node = walker.nextNode()) {
         const nodeText = normalizeText(node.textContent);
-        if (nodeText.includes(normalizeText(text))) {
-          const startIndex = nodeText.indexOf(normalizeText(text));
-          const endIndex = startIndex + normalizeText(text).length;
+        if (nodeText.includes(normalizedSearch)) {
+          const startIndex = nodeText.indexOf(normalizedSearch);
+          const endIndex = startIndex + normalizedSearch.length;
 
           const range = document.createRange();
           range.setStart(node, startIndex);
@@ -169,75 +208,63 @@
         }
       }
 
-      if (!found) {
-        box.style.display = 'none';
-      } else {
-        box.style.display = 'block';
-      }
+      box.style.display = found ? 'block' : 'none';
     });
   }
 
-  function normalizeText(text) {
-    if (!text) return '';
-    text = text.replace(/<!--[\s\S]*?-->/g, '');
-    text = text.replace(/<[^>]+>/g, ' ');
-    text = text.replace(/\s+/g, ' ').trim();
-    return text;
-  }
+  // ============================================
+  // Highlight Container
+  // ============================================
 
-  function highlightText(text, type, explanation, suggestion) {
-    const tooltip = createTooltip(text, type, explanation, suggestion);
-    const normalizedSearchText = normalizeText(text);
+  function getOrCreateHighlightContainer() {
+    let container = document.getElementById('content-critic-highlights');
 
-    if (!normalizedSearchText) return;
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'content-critic-highlights';
+      container.style.cssText = `
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 2147483646;
+      `;
+      document.body.appendChild(container);
 
-    let highlightContainer = document.getElementById('content-critic-highlights');
-    if (!highlightContainer) {
-      highlightContainer = document.createElement('div');
-      highlightContainer.id = 'content-critic-highlights';
-      highlightContainer.style.position = 'absolute';
-      highlightContainer.style.top = '0';
-      highlightContainer.style.left = '0';
-      highlightContainer.style.width = '100%';
-      highlightContainer.style.height = '100%';
-      highlightContainer.style.pointerEvents = 'none';
-      highlightContainer.style.zIndex = '2147483646';
-      document.body.appendChild(highlightContainer);
-
-      const resizeObserver = new ResizeObserver(() => {
-        updateHighlightPositions();
-      });
-
+      const resizeObserver = new ResizeObserver(updateHighlightPositions);
       resizeObserver.observe(document.body);
+
       document.querySelectorAll('main, article, .content, #content, [role="main"]').forEach(el => {
         resizeObserver.observe(el);
       });
 
-      highlightContainer._resizeObserver = resizeObserver;
+      container._resizeObserver = resizeObserver;
+
+      window.addEventListener('scroll', updateHighlightPositions);
     }
 
-    const walker = document.createTreeWalker(
-      document.body,
-      NodeFilter.SHOW_TEXT,
-      {
-        acceptNode: function(node) {
-          if (!node.parentElement ||
-              node.parentElement.closest('script, style, noscript, .content-critic-highlight-box')) {
-            return NodeFilter.FILTER_REJECT;
-          }
-          if (!node.textContent || normalizeText(node.textContent).length === 0) {
-            return NodeFilter.FILTER_REJECT;
-          }
-          return NodeFilter.FILTER_ACCEPT;
-        }
-      },
-      false
-    );
+    return container;
+  }
+
+  // ============================================
+  // Main Highlight Function
+  // ============================================
+
+  function highlightText(highlight) {
+    const { text, type, explanation, suggestion } = highlight;
+    const normalizedSearchText = normalizeText(text);
+
+    if (!normalizedSearchText) return;
+
+    const tooltip = createTooltip(highlight);
+    const container = getOrCreateHighlightContainer();
+    const walker = createTextWalker();
 
     let node;
     while (node = walker.nextNode()) {
-      const nodeText = node.textContent;
-      const normalizedNodeText = normalizeText(nodeText);
+      const normalizedNodeText = normalizeText(node.textContent);
 
       if (normalizedNodeText.includes(normalizedSearchText)) {
         const startIndex = normalizedNodeText.indexOf(normalizedSearchText);
@@ -252,32 +279,41 @@
         rects.forEach(rect => {
           const box = createHighlightBox(rect, type, tooltip);
           box.setAttribute('data-highlight-text', text);
-          highlightContainer.appendChild(box);
+          container.appendChild(box);
         });
       }
     }
-
-    window.addEventListener('scroll', updateHighlightPositions);
   }
+
+  // ============================================
+  // Cleanup
+  // ============================================
 
   function removeHighlights() {
     const container = document.getElementById('content-critic-highlights');
     if (container) {
-      if (container._resizeObserver) {
-        container._resizeObserver.disconnect();
-      }
+      container._resizeObserver?.disconnect();
       container.remove();
     }
     document.querySelectorAll('.content-critic-tooltip').forEach(el => el.remove());
     window.removeEventListener('scroll', updateHighlightPositions);
   }
 
+  // ============================================
+  // Content Extraction
+  // ============================================
+
   function extractContent() {
-    const content = document.body.innerText;
-    const title = document.title;
-    const url = window.location.href;
-    return { content, title, url };
+    return {
+      content: document.body.innerText,
+      title: document.title,
+      url: window.location.href
+    };
   }
+
+  // ============================================
+  // Message Handler
+  // ============================================
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     switch (request.action) {
@@ -291,9 +327,7 @@
 
       case 'highlightContent':
         removeHighlights();
-        request.highlights.forEach(h => {
-          highlightText(h.text, h.type, h.explanation, h.suggestion);
-        });
+        request.highlights.forEach(highlightText);
         sendResponse({ success: true });
         break;
 

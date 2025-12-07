@@ -7,6 +7,51 @@ let isAnalyzing = false;
 let currentRawContent = null;
 let currentRawResponse = null;
 
+// ============================================
+// Utility Functions
+// ============================================
+
+async function getActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab;
+}
+
+function isValidWebPage(tab) {
+  return tab?.url?.startsWith('http');
+}
+
+function getUrlKey(url) {
+  try {
+    return url.replace(/\/$/, '').split('#')[0];
+  } catch (e) {
+    return url;
+  }
+}
+
+function fixMarkdownTables(text) {
+  if (!text) return '';
+  return text
+    .replace(/\|\n\|/g, '|\n|')
+    .replace(/\n\s*\n\s*\|/g, '\n|')
+    .replace(/\|\s*\n\s*\n/g, '|\n');
+}
+
+function computeTokenInfo(content) {
+  const charCount = content.length;
+  const wordCount = content.trim().split(/\s+/).length;
+  const estimatedTokens = Math.ceil(charCount / 4);
+  return {
+    charCount,
+    wordCount,
+    estimatedTokens,
+    displayText: `≈ ${estimatedTokens.toLocaleString()} tokens (${wordCount.toLocaleString()} words, ${charCount.toLocaleString()} chars)`
+  };
+}
+
+// ============================================
+// Storage Functions
+// ============================================
+
 function saveApiKey() {
   const apiKey = document.getElementById('apiKey').value;
   chrome.storage.local.set({ apiKey });
@@ -17,7 +62,51 @@ function saveLanguage() {
   chrome.storage.local.set({ language });
 }
 
-// Function to filter out our highlights from content
+async function storeAnalysisResults(urlKey, data) {
+  const { tabResults = {} } = await chrome.storage.local.get('tabResults');
+  tabResults[urlKey] = {
+    ...data,
+    timestamp: Date.now(),
+    isAnalyzing: false
+  };
+  await chrome.storage.local.set({ tabResults });
+}
+
+async function updateAnalyzingState(urlKey, analyzing, tabId) {
+  const { tabResults = {} } = await chrome.storage.local.get('tabResults');
+  tabResults[urlKey] = {
+    ...tabResults[urlKey],
+    isAnalyzing: analyzing,
+    timestamp: Date.now(),
+    tabId
+  };
+  await chrome.storage.local.set({ tabResults });
+}
+
+async function cleanupOldTabResults() {
+  try {
+    const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+
+    const { tabResults = {} } = await chrome.storage.local.get('tabResults');
+    const cleanedResults = {};
+
+    Object.entries(tabResults).forEach(([urlKey, data]) => {
+      if (data.timestamp && (now - data.timestamp) < ONE_WEEK_MS) {
+        cleanedResults[urlKey] = data;
+      }
+    });
+
+    await chrome.storage.local.set({ tabResults: cleanedResults });
+  } catch (error) {
+    // Silently fail
+  }
+}
+
+// ============================================
+// Content Filtering
+// ============================================
+
 function filterHighlights(content) {
   if (!content) return '';
 
@@ -31,18 +120,20 @@ function filterHighlights(content) {
     cleanContent = cleanContent.replace(pattern, '');
   });
 
-  cleanContent = cleanContent
+  return cleanContent
     .replace(/\n\s*\n\s*\n/g, '\n\n')
     .replace(/^\s+|\s+$/g, '');
-
-  return cleanContent;
 }
 
-function setLoadingState(isLoading) {
+// ============================================
+// UI State Management
+// ============================================
+
+function setLoadingState(loading) {
   const resultDiv = document.getElementById('result');
   const analyzeBtn = document.getElementById('analyzeBtn');
 
-  if (isLoading) {
+  if (loading) {
     analyzeBtn.disabled = true;
     analyzeBtn.textContent = 'Analyzing...';
     resultDiv.innerHTML = `
@@ -59,21 +150,78 @@ function setLoadingState(isLoading) {
 async function syncUIWithTabState(urlKey) {
   const { tabResults = {} } = await chrome.storage.local.get('tabResults');
   const tabData = tabResults[urlKey];
-
-  if (tabData?.isAnalyzing) {
-    setLoadingState(true);
-  } else {
-    setLoadingState(false);
-  }
+  setLoadingState(tabData?.isAnalyzing || false);
 }
 
-function getUrlKey(url) {
+function displayResult(text, title = '') {
+  const resultDiv = document.getElementById('result');
+  if (!resultDiv) return;
+
   try {
-    return url.replace(/\/$/, '').split('#')[0];
-  } catch (e) {
-    return url;
+    let displayText;
+
+    if (typeof text === 'string') {
+      displayText = fixMarkdownTables(text);
+    } else if (text && typeof text === 'object') {
+      const summary = text.summary || text.analysis?.summary || '';
+      const critique = text.critique || text.analysis?.critique || '';
+      displayText = `${fixMarkdownTables(summary)}\n\n${fixMarkdownTables(critique)}`;
+    } else {
+      displayText = 'Invalid analysis format';
+    }
+
+    const htmlContent = simpleMarkdown(displayText);
+    const titleHtml = title ? `<div class="article-title">Analyzing: ${title}</div>` : '';
+
+    resultDiv.innerHTML = `
+      <div class="result">
+        ${titleHtml}
+        <div class="markdown-content">${htmlContent}</div>
+      </div>`;
+    resultDiv.scrollTop = 0;
+  } catch (error) {
+    const titleHtml = title ? `<div class="article-title">Analyzing: ${title}</div>` : '';
+    resultDiv.innerHTML = `
+      <div class="result">
+        ${titleHtml}
+        <div class="markdown-content">${typeof text === 'string' ? text : JSON.stringify(text, null, 2)}</div>
+      </div>`;
   }
 }
+
+function displayError(error) {
+  const resultDiv = document.getElementById('result');
+  resultDiv.innerHTML = `<div class="result error">${error}</div>`;
+}
+
+function updateApiKeyStatus(apiKey) {
+  const statusElement = document.getElementById('apiKeyStatus');
+
+  if (apiKey) {
+    const isValid = apiKey.startsWith('sk-');
+    statusElement.textContent = isValid ? 'Configured' : 'Invalid format';
+    statusElement.className = `api-key-status ${isValid ? 'valid' : ''}`;
+  } else {
+    statusElement.textContent = 'Not configured';
+    statusElement.className = 'api-key-status';
+  }
+}
+
+// ============================================
+// Modal Management
+// ============================================
+
+function showModal(modalElement) {
+  modalElement?.classList.add('visible');
+}
+
+function hideModal(modalElement) {
+  modalElement?.classList.remove('visible');
+}
+
+// ============================================
+// API Functions
+// ============================================
 
 async function makeApiCall(promptInstance, content, options = {}) {
   const apiKey = options.apiKey;
@@ -95,32 +243,14 @@ async function makeApiCall(promptInstance, content, options = {}) {
   });
 
   const parsedResponse = promptInstance.parseResponse(rawResponse);
-
   return { raw: rawResponse, parsed: parsedResponse };
 }
 
-async function storeAnalysisResults(urlKey, data) {
-  const { tabResults = {} } = await chrome.storage.local.get('tabResults');
-  tabResults[urlKey] = {
-    ...data,
-    timestamp: Date.now(),
-    isAnalyzing: false
-  };
-  await chrome.storage.local.set({ tabResults });
-}
+// ============================================
+// Analysis Functions
+// ============================================
 
-async function updateAnalyzingState(urlKey, isAnalyzing, tabId) {
-  const { tabResults = {} } = await chrome.storage.local.get('tabResults');
-  tabResults[urlKey] = {
-    ...tabResults[urlKey],
-    isAnalyzing,
-    timestamp: Date.now(),
-    tabId
-  };
-  await chrome.storage.local.set({ tabResults });
-}
-
-async function _executeAnalysisAndUpdateUI(contentToAnalyze, tabInfo, apiKey) {
+async function executeAnalysis(contentToAnalyze, tabInfo, apiKey) {
   const urlKey = getUrlKey(tabInfo.url);
   currentTabId = tabInfo.id;
   isAnalyzing = true;
@@ -134,13 +264,10 @@ async function _executeAnalysisAndUpdateUI(contentToAnalyze, tabInfo, apiKey) {
     const tokenInfo = computeTokenInfo(contentToAnalyze);
     document.getElementById('rawContentTokenInfo').textContent = tokenInfo.displayText;
 
-    // Get stored language preference
     const { language = 'ENGLISH' } = await chrome.storage.local.get('language');
     const promptInstance = new CriticPrompt({ language });
 
-    const { raw, parsed } = await makeApiCall(promptInstance, contentToAnalyze, {
-      apiKey
-    });
+    const { raw, parsed } = await makeApiCall(promptInstance, contentToAnalyze, { apiKey });
     currentRawResponse = raw;
 
     const storedData = {
@@ -161,20 +288,20 @@ async function _executeAnalysisAndUpdateUI(contentToAnalyze, tabInfo, apiKey) {
 
     await storeAnalysisResults(urlKey, storedData);
 
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTab.id === tabInfo.id) {
+    const activeTab = await getActiveTab();
+    if (activeTab?.id === tabInfo.id) {
       displayResult(parsed.analysis, tabInfo.title);
     }
 
   } catch (error) {
     await updateAnalyzingState(urlKey, false, tabInfo.id);
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTab.id === tabInfo.id) {
+    const activeTab = await getActiveTab();
+    if (activeTab?.id === tabInfo.id) {
       displayError('Error: ' + error.message);
     }
   } finally {
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTab.id === tabInfo.id) {
+    const activeTab = await getActiveTab();
+    if (activeTab?.id === tabInfo.id) {
       isAnalyzing = false;
       setLoadingState(false);
     }
@@ -191,7 +318,7 @@ async function analyzeContent() {
     return;
   }
 
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = await getActiveTab();
   if (!tab || !tab.url) {
     displayError('Unable to find active tab or tab URL');
     return;
@@ -233,7 +360,7 @@ async function analyzeContent() {
       contentToAnalyze = filterHighlights(response.content);
     }
 
-    await _executeAnalysisAndUpdateUI(contentToAnalyze, {
+    await executeAnalysis(contentToAnalyze, {
       id: tab.id,
       url: tab.url,
       title: tab.title
@@ -245,270 +372,6 @@ async function analyzeContent() {
     setLoadingState(false);
     isAnalyzing = false;
   }
-}
-
-function displayResult(text, title = '') {
-  const resultDiv = document.getElementById('result');
-  if (!resultDiv) return;
-
-  try {
-    let displayText;
-    let htmlContent;
-
-    if (typeof text === 'string') {
-      displayText = text.replace(/\|\n\|/g, '|\n|');
-      displayText = displayText.replace(/\n\s*\n\s*\|/g, '\n|');
-      displayText = displayText.replace(/\|\s*\n\s*\n/g, '|\n');
-    } else if (text && typeof text === 'object') {
-      let summary = text.summary || (text.analysis && text.analysis.summary) || '';
-      let critique = text.critique || (text.analysis && text.analysis.critique) || '';
-
-      summary = summary.replace(/\|\n\|/g, '|\n|')
-                      .replace(/\n\s*\n\s*\|/g, '\n|')
-                      .replace(/\|\s*\n\s*\n/g, '|\n');
-      critique = critique.replace(/\|\n\|/g, '|\n|')
-                        .replace(/\n\s*\n\s*\|/g, '\n|')
-                        .replace(/\|\s*\n\s*\n/g, '|\n');
-
-      displayText = `${summary}\n\n${critique}`;
-    } else {
-      displayText = 'Invalid analysis format';
-    }
-
-    htmlContent = simpleMarkdown(displayText);
-
-    const titleHtml = title ? `<div class="article-title">Analyzing: ${title}</div>` : '';
-    resultDiv.innerHTML = `
-      <div class="result">
-        ${titleHtml}
-        <div class="markdown-content">${htmlContent}</div>
-      </div>`;
-
-    resultDiv.scrollTop = 0;
-  } catch (error) {
-    const titleHtml = title ? `<div class="article-title">Analyzing: ${title}</div>` : '';
-    resultDiv.innerHTML = `
-      <div class="result">
-        ${titleHtml}
-        <div class="markdown-content">${typeof text === 'string' ? text : JSON.stringify(text, null, 2)}</div>
-      </div>`;
-  }
-}
-
-function displayError(error) {
-  const resultDiv = document.getElementById('result');
-  resultDiv.innerHTML = `<div class="result error">${error}</div>`;
-}
-
-function showModal(modalElement) {
-  if (modalElement) {
-    modalElement.classList.add('visible');
-  }
-}
-
-function hideModal(modalElement) {
-  if (modalElement) {
-    modalElement.classList.remove('visible');
-  }
-}
-
-// Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-  initializeExtension();
-
-  const apiKeyModal = document.getElementById('apiKeyModal');
-  const rawContentModal = document.getElementById('rawContentModal');
-  const rawResponseModal = document.getElementById('rawResponseModal');
-
-  const headerButtonsContainer = document.createElement('div');
-  headerButtonsContainer.className = 'header-buttons-container';
-  headerButtonsContainer.innerHTML = `
-    <button id="apiKeyBtn" class="header-button icon-only" title="API Settings">
-      <span class="button-icon">⚙️</span>
-    </button>
-    <button id="rawContentBtn" class="header-button icon-only" title="Raw Content">
-      <span class="button-icon">📄</span>
-    </button>
-    <button id="rawResponseBtn" class="header-button icon-only" title="Raw Response">
-      <span class="button-icon">📋</span>
-    </button>
-    <button id="analyzeBtn" class="header-button primary" title="Analyze Content">
-      <span class="button-text">Analyze</span>
-    </button>
-  `;
-
-  const headerRight = document.querySelector('.header-right');
-  const oldButtons = headerRight.querySelectorAll('.header-button');
-  oldButtons.forEach(btn => btn.remove());
-  headerRight.appendChild(headerButtonsContainer);
-
-  document.getElementById('analyzeBtn').addEventListener('click', analyzeContent);
-
-  document.getElementById('apiKeyBtn').addEventListener('click', () => {
-    showModal(apiKeyModal);
-    chrome.storage.local.get(['apiKey', 'language'], (result) => {
-      if (result.apiKey) {
-        document.getElementById('apiKey').value = result.apiKey;
-        updateApiKeyStatus(result.apiKey);
-      }
-      if (result.language) {
-        document.getElementById('language').value = result.language;
-      }
-    });
-  });
-
-  document.getElementById('closeApiKeyBtn').addEventListener('click', () => {
-    hideModal(apiKeyModal);
-  });
-
-  document.getElementById('saveApiKeyBtn').addEventListener('click', () => {
-    saveApiKey();
-    saveLanguage();
-    hideModal(apiKeyModal);
-  });
-
-  document.getElementById('rawContentBtn').addEventListener('click', () => {
-    const textDiv = document.getElementById('rawContentText');
-
-    if (currentRawContent) {
-      const tokenInfo = document.getElementById('rawContentTokenInfo');
-      tokenInfo.textContent = computeTokenInfo(currentRawContent).displayText;
-      textDiv.textContent = currentRawContent;
-      document.getElementById('copyContentBtn').style.display = 'block';
-    } else {
-      textDiv.textContent = 'No content available';
-      document.getElementById('copyContentBtn').style.display = 'none';
-    }
-    showModal(rawContentModal);
-  });
-
-  document.getElementById('closeRawContentBtn').addEventListener('click', () => {
-    hideModal(rawContentModal);
-  });
-
-  document.getElementById('rawResponseBtn').addEventListener('click', () => {
-    const textDiv = document.getElementById('rawResponseText');
-
-    if (currentRawResponse) {
-      try {
-        const jsonResponse = JSON.parse(currentRawResponse);
-        textDiv.textContent = JSON.stringify(jsonResponse, null, 2);
-      } catch (e) {
-        textDiv.textContent = currentRawResponse;
-      }
-      const tokenInfo = document.getElementById('rawResponseTokenInfo');
-      tokenInfo.textContent = computeTokenInfo(currentRawResponse).displayText;
-    } else {
-      textDiv.textContent = 'No raw response available. Please run an analysis first.';
-    }
-    showModal(rawResponseModal);
-  });
-
-  document.getElementById('closeRawResponseBtn').addEventListener('click', () => {
-    hideModal(rawResponseModal);
-  });
-
-  document.getElementById('apiKey').addEventListener('input', (e) => {
-    updateApiKeyStatus(e.target.value);
-  });
-
-  document.getElementById('copyContentBtn').addEventListener('click', async () => {
-    if (currentRawContent) {
-      try {
-        await navigator.clipboard.writeText(currentRawContent);
-        const copyBtn = document.getElementById('copyContentBtn');
-        const originalText = copyBtn.textContent;
-        copyBtn.textContent = 'Copied!';
-        copyBtn.classList.add('copied');
-        setTimeout(() => {
-          copyBtn.textContent = originalText;
-          copyBtn.classList.remove('copied');
-        }, 2000);
-      } catch (err) {
-        // Silently fail
-      }
-    }
-  });
-
-  window.addEventListener('click', (e) => {
-    if (e.target === apiKeyModal) {
-      hideModal(apiKeyModal);
-    }
-    if (e.target === rawContentModal) {
-      hideModal(rawContentModal);
-    }
-    if (e.target === rawResponseModal) {
-      hideModal(rawResponseModal);
-    }
-  });
-});
-
-function updateApiKeyStatus(apiKey) {
-  const statusElement = document.getElementById('apiKeyStatus');
-
-  if (apiKey) {
-    const isValid = apiKey.startsWith('sk-');
-    statusElement.textContent = isValid ? 'Configured' : 'Invalid format';
-    statusElement.className = `api-key-status ${isValid ? 'valid' : ''}`;
-  } else {
-    statusElement.textContent = 'Not configured';
-    statusElement.className = 'api-key-status';
-  }
-}
-
-chrome.tabs.onActivated.addListener(async (activeInfo) => {
-  try {
-    currentTabId = activeInfo.tabId;
-    const tab = await chrome.tabs.get(activeInfo.tabId);
-
-    if (!tab.url || !tab.url.startsWith('http')) {
-      document.getElementById('result').innerHTML = '';
-      setLoadingState(false);
-      return;
-    }
-
-    const urlKey = getUrlKey(tab.url);
-    await syncUIWithTabState(urlKey);
-
-    document.getElementById('result').innerHTML = '';
-    await loadStoredAnalysis(activeInfo.tabId);
-  } catch (error) {
-    document.getElementById('result').innerHTML = '';
-    setLoadingState(false);
-  }
-});
-
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (tabId === currentTabId && changeInfo.status === 'complete') {
-    try {
-      if (!tab.url || !tab.url.startsWith('http')) {
-        document.getElementById('result').innerHTML = '';
-        setLoadingState(false);
-        return;
-      }
-
-      const urlKey = getUrlKey(tab.url);
-      await syncUIWithTabState(urlKey);
-
-      document.getElementById('result').innerHTML = '';
-      await loadStoredAnalysis(tabId);
-    } catch (error) {
-      document.getElementById('result').innerHTML = '';
-      setLoadingState(false);
-    }
-  }
-});
-
-function computeTokenInfo(content) {
-  const charCount = content.length;
-  const wordCount = content.trim().split(/\s+/).length;
-  const estimatedTokens = Math.ceil(charCount / 4);
-  return {
-    charCount,
-    wordCount,
-    estimatedTokens,
-    displayText: `≈ ${estimatedTokens.toLocaleString()} tokens (${wordCount.toLocaleString()} words, ${charCount.toLocaleString()} chars)`
-  };
 }
 
 async function loadStoredAnalysis(tabId) {
@@ -526,14 +389,13 @@ async function loadStoredAnalysis(tabId) {
     const urlKey = getUrlKey(tab.url);
     const storage = await chrome.storage.local.get('tabResults');
 
-    if (!storage || !storage.tabResults) {
+    if (!storage?.tabResults) {
       document.getElementById('result').innerHTML = '';
       setLoadingState(false);
       return;
     }
 
     const tabData = storage.tabResults[urlKey];
-
     await syncUIWithTabState(urlKey);
 
     if (tabData) {
@@ -541,8 +403,8 @@ async function loadStoredAnalysis(tabId) {
 
       if (tabData.content) {
         currentRawContent = filterHighlights(tabData.content);
-        const tokenInfo = document.getElementById('rawContentTokenInfo');
-        tokenInfo.textContent = computeTokenInfo(currentRawContent).displayText;
+        document.getElementById('rawContentTokenInfo').textContent =
+          computeTokenInfo(currentRawContent).displayText;
       }
 
       if (tabData.highlights?.length > 0) {
@@ -568,46 +430,173 @@ async function loadStoredAnalysis(tabId) {
   }
 }
 
-async function requestContentFromActiveTab() {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab) return;
+// ============================================
+// Event Listeners Setup
+// ============================================
 
-    if (!tab.url || !tab.url.startsWith('http')) return;
+function setupHeaderButtons() {
+  const headerButtonsContainer = document.createElement('div');
+  headerButtonsContainer.className = 'header-buttons-container';
+  headerButtonsContainer.innerHTML = `
+    <button id="apiKeyBtn" class="header-button icon-only" title="API Settings">
+      <span class="button-icon">⚙️</span>
+    </button>
+    <button id="rawContentBtn" class="header-button icon-only" title="Raw Content">
+      <span class="button-icon">📄</span>
+    </button>
+    <button id="rawResponseBtn" class="header-button icon-only" title="Raw Response">
+      <span class="button-icon">📋</span>
+    </button>
+    <button id="analyzeBtn" class="header-button primary" title="Analyze Content">
+      <span class="button-text">Analyze</span>
+    </button>
+  `;
 
-    currentTabId = tab.id;
-    await loadStoredAnalysis(tab.id);
-  } catch (error) {
-    // Silently fail
-  }
+  const headerRight = document.querySelector('.header-right');
+  headerRight.querySelectorAll('.header-button').forEach(btn => btn.remove());
+  headerRight.appendChild(headerButtonsContainer);
 }
 
-requestContentFromActiveTab();
-
-async function cleanupOldTabResults() {
-  try {
-    const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-    const now = Date.now();
-
-    const { tabResults = {} } = await chrome.storage.local.get('tabResults');
-    const cleanedResults = {};
-    let cleanedCount = 0;
-
-    Object.entries(tabResults).forEach(([urlKey, data]) => {
-      if (data.timestamp && (now - data.timestamp) < ONE_WEEK_MS) {
-        cleanedResults[urlKey] = data;
-      } else {
-        cleanedCount++;
+function setupModalListeners(apiKeyModal, rawContentModal, rawResponseModal) {
+  // API Key Modal
+  document.getElementById('apiKeyBtn').addEventListener('click', () => {
+    showModal(apiKeyModal);
+    chrome.storage.local.get(['apiKey', 'language'], (result) => {
+      if (result.apiKey) {
+        document.getElementById('apiKey').value = result.apiKey;
+        updateApiKeyStatus(result.apiKey);
+      }
+      if (result.language) {
+        document.getElementById('language').value = result.language;
       }
     });
+  });
 
-    if (cleanedCount > 0) {
-      await chrome.storage.local.set({ tabResults: cleanedResults });
+  document.getElementById('closeApiKeyBtn').addEventListener('click', () => hideModal(apiKeyModal));
+
+  document.getElementById('saveApiKeyBtn').addEventListener('click', () => {
+    saveApiKey();
+    saveLanguage();
+    hideModal(apiKeyModal);
+  });
+
+  document.getElementById('apiKey').addEventListener('input', (e) => {
+    updateApiKeyStatus(e.target.value);
+  });
+
+  // Raw Content Modal
+  document.getElementById('rawContentBtn').addEventListener('click', () => {
+    const textDiv = document.getElementById('rawContentText');
+
+    if (currentRawContent) {
+      document.getElementById('rawContentTokenInfo').textContent =
+        computeTokenInfo(currentRawContent).displayText;
+      textDiv.textContent = currentRawContent;
+      document.getElementById('copyContentBtn').style.display = 'block';
+    } else {
+      textDiv.textContent = 'No content available';
+      document.getElementById('copyContentBtn').style.display = 'none';
     }
-  } catch (error) {
-    // Silently fail
-  }
+    showModal(rawContentModal);
+  });
+
+  document.getElementById('closeRawContentBtn').addEventListener('click', () => hideModal(rawContentModal));
+
+  document.getElementById('copyContentBtn').addEventListener('click', async () => {
+    if (currentRawContent) {
+      try {
+        await navigator.clipboard.writeText(currentRawContent);
+        const copyBtn = document.getElementById('copyContentBtn');
+        const originalText = copyBtn.textContent;
+        copyBtn.textContent = 'Copied!';
+        copyBtn.classList.add('copied');
+        setTimeout(() => {
+          copyBtn.textContent = originalText;
+          copyBtn.classList.remove('copied');
+        }, 2000);
+      } catch (err) {
+        // Silently fail
+      }
+    }
+  });
+
+  // Raw Response Modal
+  document.getElementById('rawResponseBtn').addEventListener('click', () => {
+    const textDiv = document.getElementById('rawResponseText');
+
+    if (currentRawResponse) {
+      try {
+        const jsonResponse = JSON.parse(currentRawResponse);
+        textDiv.textContent = JSON.stringify(jsonResponse, null, 2);
+      } catch (e) {
+        textDiv.textContent = currentRawResponse;
+      }
+      document.getElementById('rawResponseTokenInfo').textContent =
+        computeTokenInfo(currentRawResponse).displayText;
+    } else {
+      textDiv.textContent = 'No raw response available. Please run an analysis first.';
+    }
+    showModal(rawResponseModal);
+  });
+
+  document.getElementById('closeRawResponseBtn').addEventListener('click', () => hideModal(rawResponseModal));
+
+  // Click outside to close modals
+  window.addEventListener('click', (e) => {
+    if (e.target === apiKeyModal) hideModal(apiKeyModal);
+    if (e.target === rawContentModal) hideModal(rawContentModal);
+    if (e.target === rawResponseModal) hideModal(rawResponseModal);
+  });
 }
+
+function setupTabListeners() {
+  chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    try {
+      currentTabId = activeInfo.tabId;
+      const tab = await chrome.tabs.get(activeInfo.tabId);
+
+      if (!isValidWebPage(tab)) {
+        document.getElementById('result').innerHTML = '';
+        setLoadingState(false);
+        return;
+      }
+
+      const urlKey = getUrlKey(tab.url);
+      await syncUIWithTabState(urlKey);
+
+      document.getElementById('result').innerHTML = '';
+      await loadStoredAnalysis(activeInfo.tabId);
+    } catch (error) {
+      document.getElementById('result').innerHTML = '';
+      setLoadingState(false);
+    }
+  });
+
+  chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+    if (tabId === currentTabId && changeInfo.status === 'complete') {
+      try {
+        if (!isValidWebPage(tab)) {
+          document.getElementById('result').innerHTML = '';
+          setLoadingState(false);
+          return;
+        }
+
+        const urlKey = getUrlKey(tab.url);
+        await syncUIWithTabState(urlKey);
+
+        document.getElementById('result').innerHTML = '';
+        await loadStoredAnalysis(tabId);
+      } catch (error) {
+        document.getElementById('result').innerHTML = '';
+        setLoadingState(false);
+      }
+    }
+  });
+}
+
+// ============================================
+// Initialization
+// ============================================
 
 async function initializeExtension() {
   if (window.extensionInitialized) return;
@@ -625,11 +614,10 @@ async function initializeExtension() {
       document.getElementById('language').value = language;
     }
 
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tab = tabs[0];
+    const tab = await getActiveTab();
     if (tab) {
       currentTabId = tab.id;
-      if (tab.url && tab.url.startsWith('http')) {
+      if (isValidWebPage(tab)) {
         await loadStoredAnalysis(tab.id);
       }
     }
@@ -637,3 +625,31 @@ async function initializeExtension() {
     // Silently fail
   }
 }
+
+// Initialize when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  initializeExtension();
+
+  const apiKeyModal = document.getElementById('apiKeyModal');
+  const rawContentModal = document.getElementById('rawContentModal');
+  const rawResponseModal = document.getElementById('rawResponseModal');
+
+  setupHeaderButtons();
+  setupModalListeners(apiKeyModal, rawContentModal, rawResponseModal);
+  setupTabListeners();
+
+  document.getElementById('analyzeBtn').addEventListener('click', analyzeContent);
+});
+
+// Request content from active tab on load
+(async () => {
+  try {
+    const tab = await getActiveTab();
+    if (tab && isValidWebPage(tab)) {
+      currentTabId = tab.id;
+      await loadStoredAnalysis(tab.id);
+    }
+  } catch (error) {
+    // Silently fail
+  }
+})();
