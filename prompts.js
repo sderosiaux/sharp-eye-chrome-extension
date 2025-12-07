@@ -3,7 +3,7 @@ class CriticPrompt {
   constructor(options = {}) {
     this.language = options.language || 'ENGLISH';
     this.maxTokens = options.maxTokens || 20000;
-    this.model = options.model || 'gpt-5-mini';
+    this.model = options.model || 'gpt-5.1';
     this.validHighlightTypes = ['fluff', 'fallacy', 'assumption', 'contradiction', 'inconsistency'];
   }
 
